@@ -543,6 +543,30 @@ function CompanyDetail({ company, data, setData, go, addActivity, readOnly }) {
   const comp = data.compliance.filter((c) => c.companyId === company.id);
   const tasks = data.tasks.filter((t) => t.companyId === company.id);
   const [note, setNote] = useState("");
+  const [linkDirectorId, setLinkDirectorId] = useState("");
+  const unlinkedDirectors = data.directors.filter((d) => !company.directorIds.includes(d.id));
+
+  const linkDirector = (directorId) => {
+    if (!directorId) return;
+    setData((d) => ({
+      ...d,
+      companies: d.companies.map((c) => c.id === company.id ? { ...c, directorIds: [...c.directorIds, directorId] } : c),
+      directors: d.directors.map((dir) => dir.id === directorId ? { ...dir, companyIds: [...dir.companyIds, company.id] } : dir),
+    }));
+    const dirName = data.directors.find((d) => d.id === directorId)?.fullName;
+    addActivity("Linked director", `${dirName} to ${company.name}`);
+    setLinkDirectorId("");
+  };
+
+  const unlinkDirector = (directorId) => {
+    setData((d) => ({
+      ...d,
+      companies: d.companies.map((c) => c.id === company.id ? { ...c, directorIds: c.directorIds.filter((id) => id !== directorId) } : c),
+      directors: d.directors.map((dir) => dir.id === directorId ? { ...dir, companyIds: dir.companyIds.filter((id) => id !== company.id) } : dir),
+    }));
+    const dirName = data.directors.find((d) => d.id === directorId)?.fullName;
+    addActivity("Unlinked director", `${dirName} from ${company.name}`);
+  };
 
   return (
     <div className="p-4 md:p-6 space-y-4">
@@ -585,14 +609,31 @@ function CompanyDetail({ company, data, setData, go, addActivity, readOnly }) {
         )}
 
         {tab === "Directors" && (
-          <div className="space-y-2">
-            {directors.map((d) => (
-              <div key={d.id} onClick={() => go("directors", d.id)} className="flex items-center justify-between p-3 rounded-lg hover:bg-slate-50 cursor-pointer border border-slate-100">
-                <div><div className="font-medium text-slate-800">{d.fullName}</div><div className="text-xs text-slate-400">{d.nationality} · Appointed {fmtDate(d.appointmentDate)}</div></div>
-                <Badge tone={statusTone(d.status)}>{d.status}</Badge>
+          <div className="space-y-4">
+            {!readOnly && (
+              <div className="flex gap-2">
+                <select value={linkDirectorId} onChange={(e) => setLinkDirectorId(e.target.value)} className={inputCls}>
+                  <option value="">Select a director to link…</option>
+                  {unlinkedDirectors.map((d) => <option key={d.id} value={d.id}>{d.fullName}</option>)}
+                </select>
+                <button onClick={() => linkDirector(linkDirectorId)} disabled={!linkDirectorId} className="px-4 py-2 text-sm rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-40 whitespace-nowrap">Link</button>
               </div>
-            ))}
-            {directors.length === 0 && <EmptyState icon={Users} title="No directors linked" />}
+            )}
+            <div className="space-y-2">
+              {directors.map((d) => (
+                <div key={d.id} className="flex items-center justify-between p-3 rounded-lg border border-slate-100">
+                  <div onClick={() => go("directors", d.id)} className="cursor-pointer hover:opacity-70 flex-1">
+                    <div className="font-medium text-slate-800">{d.fullName}</div>
+                    <div className="text-xs text-slate-400">{d.nationality} · Appointed {fmtDate(d.appointmentDate)}</div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Badge tone={statusTone(d.status)}>{d.status}</Badge>
+                    {!readOnly && <button onClick={() => unlinkDirector(d.id)} className="text-xs text-slate-400 hover:text-rose-600 px-1">Unlink</button>}
+                  </div>
+                </div>
+              ))}
+              {directors.length === 0 && <EmptyState icon={Users} title="No directors linked" sub="Use the dropdown above to link one." />}
+            </div>
           </div>
         )}
 
@@ -774,8 +815,130 @@ function DirectorsList({ data, go, setData, addActivity, readOnly }) {
   );
 }
 
-function DirectorDetail({ director, data, go }) {
+function BulkLinkCompaniesModal({ director, companies, onClose, onSave }) {
+  const [selected, setSelected] = useState(() => new Set(director.companyIds));
+  const [query, setQuery] = useState("");
+  const [jurFilter, setJurFilter] = useState("All");
+
+  const filtered = companies.filter((c) =>
+    (jurFilter === "All" || c.jurisdiction === jurFilter) &&
+    c.name.toLowerCase().includes(query.toLowerCase())
+  );
+
+  const toggle = (id) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const selectAllFiltered = () => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      filtered.forEach((c) => next.add(c.id));
+      return next;
+    });
+  };
+
+  const clearAllFiltered = () => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      filtered.forEach((c) => next.delete(c.id));
+      return next;
+    });
+  };
+
+  return (
+    <Modal title={`Link companies to ${director.fullName}`} onClose={onClose} wide>
+      <div className="flex flex-wrap gap-2 mb-3">
+        <div className="relative flex-1 min-w-[160px]">
+          <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search companies…" className="pl-8 pr-3 py-2 rounded-lg border border-slate-200 text-sm w-full focus:outline-none focus:ring-2 focus:ring-indigo-400" />
+        </div>
+        <select value={jurFilter} onChange={(e) => setJurFilter(e.target.value)} className="border border-slate-200 rounded-lg px-2.5 py-2 text-sm text-slate-600">
+          <option>All</option>
+          {JURISDICTIONS.map((j) => <option key={j}>{j}</option>)}
+        </select>
+      </div>
+      <div className="flex items-center justify-between mb-2 text-xs">
+        <span className="text-slate-500">{selected.size} selected · {filtered.length} shown</span>
+        <div className="flex gap-3">
+          <button onClick={selectAllFiltered} className="text-indigo-600 hover:underline">Select all shown</button>
+          <button onClick={clearAllFiltered} className="text-slate-400 hover:underline">Clear shown</button>
+        </div>
+      </div>
+      <div className="border border-slate-100 rounded-lg max-h-80 overflow-y-auto divide-y divide-slate-50">
+        {filtered.map((c) => (
+          <label key={c.id} className="flex items-center justify-between gap-2 px-3 py-2 cursor-pointer hover:bg-slate-50">
+            <div className="flex items-center gap-2 min-w-0">
+              <input type="checkbox" checked={selected.has(c.id)} onChange={() => toggle(c.id)} className="shrink-0" />
+              <span className="text-sm text-slate-800 truncate">{c.name}</span>
+            </div>
+            <JurBadge jurisdiction={c.jurisdiction} />
+          </label>
+        ))}
+        {filtered.length === 0 && <div className="p-4 text-sm text-slate-400 text-center">No companies match.</div>}
+      </div>
+      <div className="flex justify-end gap-2 mt-4">
+        <button onClick={onClose} className="px-4 py-2 text-sm rounded-lg text-slate-600 hover:bg-slate-100">Cancel</button>
+        <button onClick={() => onSave(Array.from(selected))} className="px-4 py-2 text-sm rounded-lg bg-indigo-600 text-white hover:bg-indigo-700">
+          Save Links ({selected.size})
+        </button>
+      </div>
+    </Modal>
+  );
+}
+
+function DirectorDetail({ director, data, go, setData, addActivity, readOnly }) {
   const companies = data.directors.find((d) => d.id === director.id)?.companyIds.map((cid) => data.companies.find((c) => c.id === cid)).filter(Boolean) || [];
+  const [linkCompanyId, setLinkCompanyId] = useState("");
+  const [showBulkLink, setShowBulkLink] = useState(false);
+  const unlinkedCompanies = data.companies.filter((c) => !director.companyIds.includes(c.id));
+
+  const linkCompany = (companyId) => {
+    if (!companyId) return;
+    setData((d) => ({
+      ...d,
+      directors: d.directors.map((dir) => dir.id === director.id ? { ...dir, companyIds: [...dir.companyIds, companyId] } : dir),
+      companies: d.companies.map((c) => c.id === companyId ? { ...c, directorIds: [...c.directorIds, director.id] } : c),
+    }));
+    const coName = data.companies.find((c) => c.id === companyId)?.name;
+    addActivity("Linked director", `${director.fullName} to ${coName}`);
+    setLinkCompanyId("");
+  };
+
+  const unlinkCompany = (companyId) => {
+    setData((d) => ({
+      ...d,
+      directors: d.directors.map((dir) => dir.id === director.id ? { ...dir, companyIds: dir.companyIds.filter((id) => id !== companyId) } : dir),
+      companies: d.companies.map((c) => c.id === companyId ? { ...c, directorIds: c.directorIds.filter((id) => id !== director.id) } : c),
+    }));
+    const coName = data.companies.find((c) => c.id === companyId)?.name;
+    addActivity("Unlinked director", `${director.fullName} from ${coName}`);
+  };
+
+  const saveBulkLinks = (selectedIds) => {
+    const selectedSet = new Set(selectedIds);
+    const before = new Set(director.companyIds);
+    const added = selectedIds.filter((id) => !before.has(id)).length;
+    const removed = director.companyIds.filter((id) => !selectedSet.has(id)).length;
+
+    setData((d) => ({
+      ...d,
+      directors: d.directors.map((dir) => dir.id === director.id ? { ...dir, companyIds: selectedIds } : dir),
+      companies: d.companies.map((c) => {
+        const shouldHave = selectedSet.has(c.id);
+        const currentlyHas = c.directorIds.includes(director.id);
+        if (shouldHave && !currentlyHas) return { ...c, directorIds: [...c.directorIds, director.id] };
+        if (!shouldHave && currentlyHas) return { ...c, directorIds: c.directorIds.filter((id) => id !== director.id) };
+        return c;
+      }),
+    }));
+    addActivity("Bulk-linked director", `${director.fullName}: +${added} / -${removed} companies`);
+    setShowBulkLink(false);
+  };
+
   return (
     <div className="p-4 md:p-6 space-y-4">
       <button onClick={() => go("directors")} className="flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800"><ArrowLeft size={15} /> Back to Directors</button>
@@ -789,15 +952,36 @@ function DirectorDetail({ director, data, go }) {
         </div>
       </div>
       <div className="bg-white rounded-xl border border-slate-200 p-5">
-        <div className="font-semibold text-slate-800 text-sm mb-3">Linked Companies</div>
+        <div className="font-semibold text-slate-800 text-sm mb-3 flex items-center justify-between">
+          <span>Linked Companies</span>
+          {!readOnly && (
+            <button onClick={() => setShowBulkLink(true)} className="flex items-center gap-1.5 text-xs bg-indigo-600 text-white px-3 py-1.5 rounded-lg hover:bg-indigo-700">
+              <Plus size={13} /> Link Multiple Companies
+            </button>
+          )}
+        </div>
+        {!readOnly && (
+          <div className="flex gap-2 mb-4">
+            <select value={linkCompanyId} onChange={(e) => setLinkCompanyId(e.target.value)} className={inputCls}>
+              <option value="">Or quickly link just one…</option>
+              {unlinkedCompanies.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+            <button onClick={() => linkCompany(linkCompanyId)} disabled={!linkCompanyId} className="px-4 py-2 text-sm rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-40 whitespace-nowrap">Link</button>
+          </div>
+        )}
         <div className="space-y-2">
           {companies.map((c) => (
-            <div key={c.id} onClick={() => go("companies", c.id)} className="flex items-center justify-between p-3 rounded-lg border border-slate-100 hover:bg-slate-50 cursor-pointer">
-              <div className="flex items-center gap-2"><Building2 size={15} className="text-slate-400" /><span className="font-medium text-slate-800">{c.name}</span></div>
-              <JurBadge jurisdiction={c.jurisdiction} />
+            <div key={c.id} className="flex items-center justify-between p-3 rounded-lg border border-slate-100">
+              <div onClick={() => go("companies", c.id)} className="flex items-center gap-2 cursor-pointer hover:opacity-70 flex-1">
+                <Building2 size={15} className="text-slate-400" /><span className="font-medium text-slate-800">{c.name}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <JurBadge jurisdiction={c.jurisdiction} />
+                {!readOnly && <button onClick={() => unlinkCompany(c.id)} className="text-xs text-slate-400 hover:text-rose-600 px-1">Unlink</button>}
+              </div>
             </div>
           ))}
-          {companies.length === 0 && <EmptyState icon={Building2} title="Not linked to any company" />}
+          {companies.length === 0 && <EmptyState icon={Building2} title="Not linked to any company" sub="Use the dropdown above to link one." />}
         </div>
       </div>
       {director.notes && (
@@ -805,6 +989,9 @@ function DirectorDetail({ director, data, go }) {
           <div className="font-semibold text-slate-800 text-sm mb-2">Notes</div>
           <p className="text-sm text-slate-600">{director.notes}</p>
         </div>
+      )}
+      {showBulkLink && (
+        <BulkLinkCompaniesModal director={director} companies={data.companies} onClose={() => setShowBulkLink(false)} onSave={saveBulkLinks} />
       )}
     </div>
   );
@@ -1342,7 +1529,7 @@ function Workspace({ session }) {
     body = co ? <CompanyDetail company={co} data={data} setData={setData} go={go} addActivity={addActivity} readOnly={readOnly} /> : <CompaniesList data={data} go={go} setData={setData} addActivity={addActivity} readOnly={readOnly} />;
   } else if (page === "directors") {
     const dr = selectedDirectorId ? data.directors.find((d) => d.id === selectedDirectorId) : null;
-    body = dr ? <DirectorDetail director={dr} data={data} go={go} /> : <DirectorsList data={data} go={go} setData={setData} addActivity={addActivity} readOnly={readOnly} />;
+    body = dr ? <DirectorDetail director={dr} data={data} go={go} setData={setData} addActivity={addActivity} readOnly={readOnly} /> : <DirectorsList data={data} go={go} setData={setData} addActivity={addActivity} readOnly={readOnly} />;
   } else if (page === "documents") body = <Documents data={data} setData={setData} addActivity={addActivity} readOnly={readOnly} />;
   else if (page === "credentials") body = <Credentials data={data} setData={setData} addActivity={addActivity} readOnly={readOnly} />;
   else if (page === "compliance") body = <Compliance data={data} setData={setData} addActivity={addActivity} readOnly={readOnly} />;
