@@ -472,7 +472,23 @@ function CompaniesList({ data, go, setData, addActivity, readOnly }) {
   const [q, setQ] = useState("");
   const [jur, setJur] = useState("All");
   const [showAdd, setShowAdd] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
   const filtered = data.companies.filter((c) => (jur === "All" || c.jurisdiction === jur) && c.name.toLowerCase().includes(q.toLowerCase()));
+
+  const confirmDelete = () => {
+    const c = deleteTarget;
+    setData((d) => ({
+      ...d,
+      companies: d.companies.filter((x) => x.id !== c.id),
+      directors: d.directors.map((dir) => ({ ...dir, companyIds: dir.companyIds.filter((id) => id !== c.id) })),
+      documents: d.documents.filter((doc) => doc.companyId !== c.id),
+      credentials: d.credentials.filter((cr) => cr.companyId !== c.id),
+      compliance: d.compliance.filter((cp) => cp.companyId !== c.id),
+      tasks: d.tasks.filter((t) => t.companyId !== c.id),
+    }));
+    addActivity("Deleted company", c.name);
+    setDeleteTarget(null);
+  };
 
   return (
     <div className="p-4 md:p-6 space-y-4">
@@ -503,6 +519,7 @@ function CompaniesList({ data, go, setData, addActivity, readOnly }) {
               <th className="px-4 py-3 font-medium hidden md:table-cell">Entity Type</th>
               <th className="px-4 py-3 font-medium hidden lg:table-cell">Renewal Date</th>
               <th className="px-4 py-3 font-medium">Status</th>
+              {!readOnly && <th className="px-4 py-3 font-medium"></th>}
             </tr>
           </thead>
           <tbody>
@@ -516,10 +533,17 @@ function CompaniesList({ data, go, setData, addActivity, readOnly }) {
                 <td className="px-4 py-3 hidden md:table-cell text-slate-600">{c.entityType}</td>
                 <td className="px-4 py-3 hidden lg:table-cell text-slate-600">{fmtDate(c.renewalDate)}</td>
                 <td className="px-4 py-3"><Badge tone={statusTone(c.status)}>{c.status}</Badge></td>
+                {!readOnly && (
+                  <td className="px-4 py-3 text-right">
+                    <button onClick={(e) => { e.stopPropagation(); setDeleteTarget(c); }} className="text-slate-300 hover:text-rose-600 p-1" title="Delete company">
+                      <Trash2 size={15} />
+                    </button>
+                  </td>
+                )}
               </tr>
             ))}
             {filtered.length === 0 && (
-              <tr><td colSpan={5}><EmptyState icon={Building2} title="No companies found" sub="Try a different search or filter." /></td></tr>
+              <tr><td colSpan={6}><EmptyState icon={Building2} title="No companies found" sub="Try a different search or filter." /></td></tr>
             )}
           </tbody>
         </table>
@@ -531,6 +555,17 @@ function CompaniesList({ data, go, setData, addActivity, readOnly }) {
           addActivity("Created company", co.name);
           setShowAdd(false);
         }} />
+      )}
+      {deleteTarget && (
+        <Modal title="Delete company?" onClose={() => setDeleteTarget(null)}>
+          <p className="text-sm text-slate-600 mb-4">
+            This permanently deletes <span className="font-medium text-slate-900">{deleteTarget.name}</span>, along with its linked documents, credentials, compliance filings, and tasks. Linked directors will be unlinked, not deleted. This can't be undone.
+          </p>
+          <div className="flex justify-end gap-2">
+            <button onClick={() => setDeleteTarget(null)} className="px-4 py-2 text-sm rounded-lg text-slate-600 hover:bg-slate-100">Cancel</button>
+            <button onClick={confirmDelete} className="px-4 py-2 text-sm rounded-lg bg-rose-600 text-white hover:bg-rose-700">Delete Company</button>
+          </div>
+        </Modal>
       )}
     </div>
   );
@@ -778,7 +813,19 @@ function AddDirectorModal({ onClose, onSave }) {
 function DirectorsList({ data, go, setData, addActivity, readOnly }) {
   const [q, setQ] = useState("");
   const [showAdd, setShowAdd] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
   const filtered = data.directors.filter((d) => d.fullName.toLowerCase().includes(q.toLowerCase()));
+
+  const confirmDelete = () => {
+    const dir = deleteTarget;
+    setData((d) => ({
+      ...d,
+      directors: d.directors.filter((x) => x.id !== dir.id),
+      companies: d.companies.map((c) => ({ ...c, directorIds: c.directorIds.filter((id) => id !== dir.id) })),
+    }));
+    addActivity("Deleted director", dir.fullName);
+    setDeleteTarget(null);
+  };
 
   return (
     <div className="p-4 md:p-6 space-y-4">
@@ -794,6 +841,7 @@ function DirectorsList({ data, go, setData, addActivity, readOnly }) {
           <thead><tr className="text-left text-xs text-slate-400 border-b border-slate-100">
             <th className="px-4 py-3 font-medium">Name</th><th className="px-4 py-3 font-medium hidden md:table-cell">Nationality</th>
             <th className="px-4 py-3 font-medium hidden lg:table-cell">Linked Companies</th><th className="px-4 py-3 font-medium">Status</th>
+            {!readOnly && <th className="px-4 py-3 font-medium"></th>}
           </tr></thead>
           <tbody>
             {filtered.map((d) => (
@@ -804,13 +852,31 @@ function DirectorsList({ data, go, setData, addActivity, readOnly }) {
                   <div className="flex flex-wrap gap-1">{d.companyIds.map((cid) => { const c = data.companies.find((x) => x.id === cid); return c ? <JurBadge key={cid} jurisdiction={c.jurisdiction} /> : null; })}</div>
                 </td>
                 <td className="px-4 py-3"><Badge tone={statusTone(d.status)}>{d.status}</Badge></td>
+                {!readOnly && (
+                  <td className="px-4 py-3 text-right">
+                    <button onClick={(e) => { e.stopPropagation(); setDeleteTarget(d); }} className="text-slate-300 hover:text-rose-600 p-1" title="Delete director">
+                      <Trash2 size={15} />
+                    </button>
+                  </td>
+                )}
               </tr>
             ))}
-            {filtered.length === 0 && <tr><td colSpan={4}><EmptyState icon={Users} title="No directors found" /></td></tr>}
+            {filtered.length === 0 && <tr><td colSpan={5}><EmptyState icon={Users} title="No directors found" /></td></tr>}
           </tbody>
         </table>
       </div>
       {showAdd && <AddDirectorModal onClose={() => setShowAdd(false)} onSave={(dr) => { setData((d) => ({ ...d, directors: [dr, ...d.directors] })); addActivity("Added director", dr.fullName); setShowAdd(false); }} />}
+      {deleteTarget && (
+        <Modal title="Delete director?" onClose={() => setDeleteTarget(null)}>
+          <p className="text-sm text-slate-600 mb-4">
+            This permanently deletes <span className="font-medium text-slate-900">{deleteTarget.fullName}</span> and removes them from any linked companies. Companies themselves are not affected. This can't be undone.
+          </p>
+          <div className="flex justify-end gap-2">
+            <button onClick={() => setDeleteTarget(null)} className="px-4 py-2 text-sm rounded-lg text-slate-600 hover:bg-slate-100">Cancel</button>
+            <button onClick={confirmDelete} className="px-4 py-2 text-sm rounded-lg bg-rose-600 text-white hover:bg-rose-700">Delete Director</button>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
